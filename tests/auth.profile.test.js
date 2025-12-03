@@ -39,6 +39,52 @@ describe('Profile endpoints', () => {
     });
   });
 
+  test('Admin can GET other user profile via query param', async () => {
+    const otherUser = new User({
+      name: 'Other User',
+      email: 'other@example.com',
+      password: 'hashedpassword',
+      role: 'user',
+    });
+    await otherUser.save();
+
+    const adminUser = new User({
+      name: 'Admin User',
+      email: 'admin@example.com',
+      password: 'hashedpassword',
+      role: 'admin',
+    });
+    await adminUser.save();
+
+    const adminToken = jwt.sign({ userId: adminUser._id, role: adminUser.role }, process.env.JWT_SECRET || 'fallback_secret');
+
+    const res = await request(app)
+      .get(`/api/auth/profile?userId=${otherUser._id}`)
+      .set('Cookie', `token=${adminToken}`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('user');
+    expect(res.body.user).toHaveProperty('email', 'other@example.com');
+  });
+
+  test('Non-admin cannot GET other user profile', async () => {
+    const otherUser = new User({
+      name: 'Other Two',
+      email: 'othertwo@example.com',
+      password: 'hashedpassword',
+      role: 'user',
+    });
+    await otherUser.save();
+
+    // token for testUser created in beforeEach
+    const res = await request(app)
+      .get(`/api/auth/profile?userId=${otherUser._id}`)
+      .set('Cookie', `token=${token}`)
+      .expect(403);
+
+    expect(res.body).toHaveProperty('message', 'Forbidden');
+  });
+
   test('PUT /api/auth/profile updates phone and address', async () => {
     const payload = {
       phone: '1234567890',

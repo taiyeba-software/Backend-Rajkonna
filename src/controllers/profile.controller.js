@@ -2,9 +2,21 @@ const User = require('../models/user.model');
 
 const getProfile = async (req, res) => {
   try {
-    const userId = req.user?.userId || req.user?.id;
-    if (!userId) return res.status(401).json({ message: 'Access token required' });
-  const user = await User.findById(userId).select('name email phone address').lean();
+    // Allow admins to fetch other users' profiles via query param ?userId=<id>
+    const requesterId = req.user?.userId || req.user?.id;
+    if (!requesterId) return res.status(401).json({ message: 'Access token required' });
+
+    let userId = requesterId;
+    const requestedUserId = req.query?.userId;
+    if (requestedUserId) {
+      // Only allow if requester is admin
+      if (req.user?.role !== 'admin') {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      userId = requestedUserId;
+    }
+
+    const user = await User.findById(userId).select('name email phone address').lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     return res.status(200).json({ user });
