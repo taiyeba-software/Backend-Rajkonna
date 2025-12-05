@@ -1,11 +1,24 @@
-const router = require('express').Router();
-const { createOrderValidator, getOrderValidator, listOrdersValidator } = require('../validators/order.validator');
-const { createOrder, getOrderById, listOrders } = require('../controllers/order.controller');
-const { authenticateToken } = require('../middlewares/auth.middleware');
-const { handleValidationErrors } = require('../validators/validate');
+const express = require("express");
+const router = express.Router();
 
-router.get('/', authenticateToken, listOrdersValidator, handleValidationErrors, listOrders);
-router.get('/:id', authenticateToken, getOrderValidator, handleValidationErrors, getOrderById);
-router.post('/', authenticateToken, createOrderValidator, handleValidationErrors, createOrder);
+const { authenticateToken } = require("../middlewares/auth.middleware");
+const { getOrderController, createOrderController, deleteOrderController, listOrders } = require("../controllers/order.controller");
+
+const {
+  createOrderValidator,
+  getOrderValidator
+} = require("../validators/order.validator");
+
+// CREATE ORDER
+router.post("/", authenticateToken, createOrderValidator, createOrderController);
+
+// LIST ORDERS
+router.get("/", authenticateToken, listOrders);
+
+// GET ORDER
+router.get("/:id", authenticateToken, getOrderValidator, getOrderController);
+
+// DELETE ORDER  ← NEW
+router.delete("/:id", authenticateToken, getOrderValidator, deleteOrderController);
 
 module.exports = router;

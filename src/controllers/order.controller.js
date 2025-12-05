@@ -58,15 +58,23 @@ async function listOrders(req, res) {
 async function getOrderById(req, res) {
   try {
     const orderId = req.params.id;
-    const order = await Order.findById(orderId).populate('items.product');
+    // Populate both items.product and user (selecting only contact fields)
+    const order = await Order.findById(orderId)
+      .populate('items.product')
+      .populate('user', 'name email phone address') // <-- populate user contact fields
+      ;
 
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    // User role check
-    if (req.user.role === 'user' && order.user.toString() !== req.user.userId) {
-      return res.status(403).json({ message: 'Forbidden' });
+    // User role check: if requester is a normal user, ensure they own the order
+    if (req.user.role === 'user') {
+      // order.user might be ObjectId or populated object; normalize
+      const orderUserId = (order.user && order.user._id) ? order.user._id.toString() : order.user.toString();
+      if (orderUserId !== req.user.userId) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
     }
 
     // Transform items to include product info and lineTotal
@@ -77,7 +85,25 @@ async function getOrderById(req, res) {
       lineTotal: Math.round(item.priceAt * item.qty * 100) / 100
     }));
 
+    // Build user contact object (if populated)
+    let userContact = null;
+    if (order.user) {
+      if (typeof order.user === 'object' && order.user._id) {
+        userContact = {
+          _id: order.user._id,
+          name: order.user.name || '',
+          email: order.user.email || '',
+          phone: order.user.phone || '',
+          address: order.user.address || {}
+        };
+      } else {
+        // fallback: only id available
+        userContact = { _id: order.user.toString() };
+      }
+    }
+
     const response = {
+      user: userContact, // <-- include user contact info here
       items: transformedItems,
       subtotal: order.subtotal,
       deliveryCharge: order.deliveryCharge,
@@ -122,4 +148,26 @@ async function createOrder(req, res) {
   }
 }
 
-module.exports = { createOrder, getOrderById, listOrders };
+async function deleteOrderController(req, res) {
+  try {
+    const orderId = req.params.id;
+    const userId = req.user.userId || req.user.id;
+    const userRole = req.user.role;
+
+    const result = await orderService.deleteOrder(orderId, userId, userRole);
+    return res.status(200).json(result);
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ message: err.message });
+    }
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
+module.exports = {
+  createOrderController: createOrder,
+  getOrderController: getOrderById,
+  listOrders,
+  deleteOrderController
+};

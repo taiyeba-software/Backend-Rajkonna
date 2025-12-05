@@ -30,4 +30,6 @@ const listOrdersValidator = [
     .withMessage('Limit must be a positive integer')
 ];
 
-module.exports = { createOrderValidator, getOrderValidator, listOrdersValidator };
+const deleteOrderValidator = getOrderValidator;
+
+module.exports = { createOrderValidator, getOrderValidator, listOrdersValidator, deleteOrderValidator };

@@ -97,4 +97,29 @@ const createOrder = async (userId, paymentMethod = null, reserveInventory = true
   return order;
 };
 
-module.exports = { createOrder, getOrderById };
+const deleteOrder = async (orderId, userId, userRole) => {
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    const error = new Error("Order not found");
+    error.status = 404;
+    throw error;
+  }
+
+  // Only owner or admin can delete
+  if (userRole === "user" && order.user.toString() !== userId) {
+    const error = new Error("Forbidden");
+    error.status = 403;
+    throw error;
+  }
+
+  await Order.findByIdAndDelete(orderId);
+
+  return { message: "Order deleted successfully" };
+};
+
+module.exports = {
+  createOrder,
+  getOrderById,
+  deleteOrder     
+};

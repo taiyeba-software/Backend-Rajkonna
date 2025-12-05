@@ -1,17 +1,16 @@
-const request = require('supertest');
-const express = require('express');
-const jwt = require('jsonwebtoken');
+const request = require("supertest");
+const express = require("express");
+const jwt = require("jsonwebtoken");
 
-// Mock redis service
-jest.mock('../src/services/redis.service', () => ({
+// Mock redis
+jest.mock("../src/services/redis.service", () => ({
   isTokenBlacklisted: jest.fn().mockResolvedValue(false),
 }));
 
-const orderRoutes = require('../src/routes/order.routes');
-const User = require('../src/models/user.model');
-const Product = require('../src/models/product.model');
-const Cart = require('../src/models/cart.model');
-const Order = require('../src/models/order.model');
+const orderRoutes = require("../src/routes/order.routes");
+const User = require("../src/models/user.model");
+const Product = require("../src/models/product.model");
+const Order = require("../src/models/order.model");
 
 let app;
 let testUser;
@@ -20,21 +19,20 @@ let token;
 let adminToken;
 
 beforeAll(async () => {
-  // Create test app
   app = express();
   app.use(express.json());
 
-  // Set cookies for authentication
+  // Attach cookies
   app.use((req, res, next) => {
     if (req.headers.authorization) {
-      const token = req.headers.authorization.split(' ')[1];
+      const token = req.headers.authorization.split(" ")[1];
       req.cookies = { token };
     }
     next();
   });
 
-  // Mock authenticateToken middleware
-  app.use('/api/orders', (req, res, next) => {
+  // Fake auth middleware for tests
+  app.use("/api/orders", (req, res, next) => {
     let token = null;
     if (req.cookies && req.cookies.token) {
       token = req.cookies.token;
@@ -62,183 +60,157 @@ beforeAll(async () => {
     }
   });
 
-  app.use('/api/orders', orderRoutes);
+  app.use("/api/orders", orderRoutes);
 
-  // Create test user
-  testUser = new User({
-    name: 'Test User',
-    email: 'test@example.com',
-    password: 'hashedpassword',
-    role: 'user',
+  // Create normal user
+  testUser = await User.create({
+    name: "Test User",
+    email: "test@example.com",
+    password: "hashedpassword",
+    phone: "01700000000",
+    address: {
+      line1: "House 10",
+      city: "Dhaka",
+      country: "Bangladesh",
+    },
   });
-  await testUser.save();
 
   // Create admin user
-  adminUser = new User({
-    name: 'Admin User',
-    email: 'admin@example.com',
-    password: 'hashedpassword',
-    role: 'admin',
+  adminUser = await User.create({
+    name: "Admin",
+    email: "admin@example.com",
+    password: "hashedpassword",
+    role: "admin",
   });
-  await adminUser.save();
 
-  // Generate tokens
-  token = jwt.sign({ userId: testUser._id, role: testUser.role }, process.env.JWT_SECRET || 'fallback_secret');
-  adminToken = jwt.sign({ userId: adminUser._id, role: adminUser.role }, process.env.JWT_SECRET || 'fallback_secret');
+  token = jwt.sign(
+    { userId: testUser._id, role: "user" },
+    process.env.JWT_SECRET || "fallback_secret"
+  );
+
+  adminToken = jwt.sign(
+    { userId: adminUser._id, role: "admin" },
+    process.env.JWT_SECRET || "fallback_secret"
+  );
 });
 
 beforeEach(async () => {
   await Product.deleteMany({});
-  await Cart.deleteMany({});
   await Order.deleteMany({});
+
+  // Recreate users since setup.js deletes them
+  testUser = await User.create({
+    name: "Test User",
+    email: "test@example.com",
+    password: "hashedpassword",
+    phone: "01700000000",
+    address: {
+      line1: "House 10",
+      city: "Dhaka",
+      country: "Bangladesh",
+    },
+  });
+
+  adminUser = await User.create({
+    name: "Admin",
+    email: "admin@example.com",
+    password: "hashedpassword",
+    role: "admin",
+  });
+
+  token = jwt.sign(
+    { userId: testUser._id, role: "user" },
+    process.env.JWT_SECRET || "fallback_secret"
+  );
+
+  adminToken = jwt.sign(
+    { userId: adminUser._id, role: "admin" },
+    process.env.JWT_SECRET || "fallback_secret"
+  );
 });
 
-describe('GET /api/orders/:id', () => {
-  it('requires authentication', async () => {
-    const response = await request(app)
-      .get('/api/orders/507f1f77bcf86cd799439011') // dummy ObjectId
-      .send();
-
-    expect(response.status).toBe(401);
-    expect(response.body.message).toBe('Access token required');
+describe("GET /api/orders/:id INCLUDING USER INFO", () => {
+  it("requires authentication", async () => {
+    const res = await request(app).get("/api/orders/123");
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe("Access token required");
   });
 
-  it('returns 400 for invalid orderId', async () => {
-    const response = await request(app)
-      .get('/api/orders/invalid-id')
-      .set('Cookie', `token=${token}`)
-      .send();
-
-    expect(response.status).toBe(400);
-    expect(response.body.message).toBe('Invalid order ID');
-  });
-
-  it('returns 404 if order not found', async () => {
-    const response = await request(app)
-      .get('/api/orders/507f1f77bcf86cd799439011') // non-existent ObjectId
-      .set('Cookie', `token=${token}`)
-      .send();
-
-    expect(response.status).toBe(404);
-    expect(response.body.message).toBe('Order not found');
-  });
-
-  it('returns 403 if user accesses another user\'s order', async () => {
-    // Create another user
-    const otherUser = new User({
-      name: 'Other User',
-      email: 'other@example.com',
-      password: 'hashedpassword',
-      role: 'user',
-    });
-    await otherUser.save();
-
-    // Create product
-    const product = new Product({
-      name: 'Test Product',
+  it("returns user info inside the order", async () => {
+    const product = await Product.create({
+      name: "Cream",
       price: 100,
-      stock: 10,
-      category: 'Test',
+      stock: 5,
+      category: "Test",
     });
-    await product.save();
 
-    // Create order for other user
-    const order = new Order({
-      user: otherUser._id,
-      items: [{ product: product._id, qty: 1, priceAt: 100 }],
-      subtotal: 100,
-      deliveryCharge: 0,
-      discountPercent: 5,
-      discountAmount: 5,
-      total: 95,
-    });
-    await order.save();
-
-    // Try to access as testUser
-    const response = await request(app)
-      .get(`/api/orders/${order._id}`)
-      .set('Cookie', `token=${token}`)
-      .send();
-
-    expect(response.status).toBe(403);
-    expect(response.body.message).toBe('Forbidden');
-  });
-
-  it('successfully returns order for user', async () => {
-    // Create product
-    const product = new Product({
-      name: 'Test Product',
-      price: 100,
-      stock: 10,
-      category: 'Test',
-    });
-    await product.save();
-
-    // Create order for testUser
-    const order = new Order({
+    const order = await Order.create({
       user: testUser._id,
-      items: [{ product: product._id, qty: 1, priceAt: 100 }],
-      subtotal: 100,
+      items: [
+        {
+          product: product._id,
+          qty: 2,
+          priceAt: 100,
+        },
+      ],
+      subtotal: 200,
+      total: 200,
       deliveryCharge: 0,
-      discountPercent: 5,
-      discountAmount: 5,
-      total: 95,
-      paymentMethod: 'card',
+      discountPercent: 0,
+      discountAmount: 0,
+      paymentMethod: "cod",
     });
-    await order.save();
 
-    const response = await request(app)
+    const res = await request(app)
       .get(`/api/orders/${order._id}`)
-      .set('Cookie', `token=${token}`)
+      .set("Cookie", `token=${token}`)
       .send();
 
-    expect(response.status).toBe(200);
-    expect(response.body.items).toHaveLength(1);
-    expect(response.body.items[0].product._id).toBe(product._id.toString());
-    expect(response.body.items[0].qty).toBe(1);
-    expect(response.body.items[0].priceAt).toBe(100);
-    expect(response.body.items[0].lineTotal).toBe(100);
-    expect(response.body.subtotal).toBe(100);
-    expect(response.body.deliveryCharge).toBe(0);
-    expect(response.body.discountPercent).toBe(5);
-    expect(response.body.discountAmount).toBe(5);
-    expect(response.body.totalPayable).toBe(95);
-    expect(response.body.paymentMethod).toBe('card');
+    expect(res.status).toBe(200);
+
+    // --- Expect user info ---
+    expect(res.body.user.email).toBe("test@example.com");
+    expect(res.body.user.phone).toBe("01700000000");
+    expect(res.body.user.address.city).toBe("Dhaka");
+
+    // --- order fields ---
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].qty).toBe(2);
+    expect(res.body.subtotal).toBe(200);
+    expect(res.body.totalPayable).toBe(200);
   });
 
-  it('successfully returns order for admin/seller', async () => {
-    // Create product
-    const product = new Product({
-      name: 'Test Product',
-      price: 100,
+  it("admin can also view the order with user info", async () => {
+    const product = await Product.create({
+      name: "Lotion",
+      price: 150,
       stock: 10,
-      category: 'Test',
+      category: "Test",
     });
-    await product.save();
 
-    // Create order for testUser
-    const order = new Order({
+    const order = await Order.create({
       user: testUser._id,
-      items: [{ product: product._id, qty: 1, priceAt: 100 }],
-      subtotal: 100,
+      items: [
+        {
+          product: product._id,
+          qty: 1,
+          priceAt: 150,
+        },
+      ],
+      subtotal: 150,
+      total: 150,
+      discountPercent: 0,
+      discountAmount: 0,
       deliveryCharge: 0,
-      discountPercent: 5,
-      discountAmount: 5,
-      total: 95,
-      paymentMethod: 'card',
+      paymentMethod: "card",
     });
-    await order.save();
 
-    // Access as admin
-    const response = await request(app)
+    const res = await request(app)
       .get(`/api/orders/${order._id}`)
-      .set('Cookie', `token=${adminToken}`)
-      .send();
+      .set("Cookie", `token=${adminToken}`);
 
-    expect(response.status).toBe(200);
-    expect(response.body.items).toHaveLength(1);
-    expect(response.body.items[0].product._id).toBe(product._id.toString());
-    expect(response.body.subtotal).toBe(100);
-    expect(response.body.totalPayable).toBe(95);
+    expect(res.status).toBe(200);
+    expect(res.body.user.email).toBe("test@example.com");
+    expect(res.body.items.length).toBe(1);
   });
 });

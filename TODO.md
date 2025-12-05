@@ -1,0 +1,4 @@
+- [ ] Add deleteOrderValidator to src/validators/order.validator.js
+- [ ] Add deleteOrder function to src/controllers/order.controller.js
+- [ ] Add DELETE route to src/routes/order.routes.js
+- [ ] Update exports in order.controller.js and order.routes.js
